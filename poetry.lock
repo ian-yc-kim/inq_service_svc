@@ -262,6 +262,18 @@ files = [
 all = ["flake8 (>=7.1.1)", "mypy (>=1.11.2)", "pytest (>=8.3.2)", "ruff (>=0.6.2)"]
 
 [[package]]
+name = "imap-tools"
+version = "1.11.0"
+description = "Work with email by IMAP"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "imap_tools-1.11.0-py3-none-any.whl", hash = "sha256:7c797b421fdf1b898b4ee0042fe02d10037d56f9acacca64086c2af36d830a24"},
+    {file = "imap_tools-1.11.0.tar.gz", hash = "sha256:77b055d301f24e668ff54ad50cc32a36d1579c6aa9b26e5fb6501fb622feb6ea"},
+]
+
+[[package]]
 name = "iniconfig"
 version = "2.3.0"
 description = "brain-dead simple config-ini parsing"
@@ -1026,4 +1038,4 @@ standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "850f5b29a264df0a9d73295adb363488b9b4f75e3a19a057e889e90e039f7617"
+content-hash = "c07d16f2a73122bc4c8a6dac49af6837819d6d51f0294429a8cda4b7159a5c6f"
