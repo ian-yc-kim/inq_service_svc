@@ -17,10 +17,12 @@ uvicorn = "^0.32.1"
 psycopg2-binary = "^2.9.11"
 openai = "^2.15.0"
 imap-tools = "^1.11.0"
+apscheduler = "^3.11.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"
 httpx = "^0.28.1"
+anyio = "^4.12.1"
 
 [tool.poetry.scripts]
 inq_service_svc = "inq_service_svc.main:main"
