@@ -14,9 +14,11 @@ sqlalchemy = "^2.0.36"
 pydantic = "^2.10.2"
 fastapi = "^0.115.5"
 uvicorn = "^0.32.1"
+psycopg2-binary = "^2.9.11"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"
+httpx = "^0.28.1"
 
 [tool.poetry.scripts]
 inq_service_svc = "inq_service_svc.main:main"

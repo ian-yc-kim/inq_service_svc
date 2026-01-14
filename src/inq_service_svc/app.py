@@ -1,5 +1,5 @@
 from fastapi import FastAPI
 
-app = FastAPI(debug=True, root_path=inq_service_svc)
-
-# add routers
+# Create FastAPI app instance for the service
+# Keep this file minimal to avoid import-time side effects
+app = FastAPI(debug=True, title="inq_service_svc")
