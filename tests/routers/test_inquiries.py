@@ -307,3 +307,56 @@ def test_patch_inquiry_update_both_fields_success_broadcasts(client, db_session)
         assert payload["inquiry_id"] == inq.id
         assert payload["status"] == "InProgress"
         assert payload["assigned_user_id"] == assignee.id
+
+
+# New tests for GET /api/inquiries/{id}
+
+def test_get_inquiry_detail_success(client, db_session):
+    # prepare user and auth
+    email = "detailtester@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    # create inquiry and messages
+    inq = Inquiry(title="Detail", content="detail content", customer_email="d@example.com", customer_name="D", status=InquiryStatus.New)
+    db_session.add(inq)
+    db_session.commit()
+    db_session.refresh(inq)
+
+    # import Message model and enum
+    from inq_service_svc.models import Message
+    from inq_service_svc.models.enums import MessageSenderType
+
+    msg1 = Message(inquiry_id=inq.id, content="First message", sender_type=MessageSenderType.Customer)
+    msg2 = Message(inquiry_id=inq.id, content="Staff reply", sender_type=MessageSenderType.Staff)
+    db_session.add_all([msg1, msg2])
+    db_session.commit()
+
+    resp = client.get(f"/api/inquiries/{inq.id}", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == inq.id
+    assert data["title"] == "Detail"
+    assert "messages" in data
+    assert isinstance(data["messages"], list)
+    assert len(data["messages"]) >= 2
+
+    # verify messages shape
+    for m in data["messages"]:
+        assert "id" in m
+        assert "content" in m
+        assert "sender_type" in m
+        assert "timestamp" in m
+        assert m["sender_type"] in {"Customer", "Staff"}
+
+
+def test_get_inquiry_detail_not_found(client, db_session):
+    email = "notfounddetail@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    resp = client.get("/api/inquiries/999999", headers=headers)
+    assert resp.status_code == 404
+    assert resp.json().get("detail") == "Inquiry not found"

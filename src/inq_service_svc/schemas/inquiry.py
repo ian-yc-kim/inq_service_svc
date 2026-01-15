@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, EmailStr, ConfigDict
 
-from inq_service_svc.models.enums import InquiryStatus
+from inq_service_svc.models.enums import InquiryStatus, MessageSenderType
 
 
 class InquiryCreate(BaseModel):
@@ -41,3 +41,18 @@ class InquiryUpdate(BaseModel):
     assigned_user_id: Optional[int] = None
 
     model_config = ConfigDict()
+
+
+class MessageResponse(BaseModel):
+    id: int
+    content: str
+    sender_type: MessageSenderType
+    timestamp: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InquiryDetailResponse(InquiryResponse):
+    messages: List[MessageResponse]
+
+    model_config = ConfigDict(from_attributes=True)

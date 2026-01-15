@@ -6,12 +6,17 @@ from typing import Optional, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select, update as sa_update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 
 from inq_service_svc.models import Inquiry, get_db, User
 from inq_service_svc.models.enums import InquiryStatus
-from inq_service_svc.schemas.inquiry import InquiryCreate, InquiryResponse, InquiryUpdate
+from inq_service_svc.schemas.inquiry import (
+    InquiryCreate,
+    InquiryResponse,
+    InquiryUpdate,
+    InquiryDetailResponse,
+)
 from inq_service_svc.services.classifier import classify_inquiry, ClassificationResult
 from inq_service_svc.services.inquiry_service import assign_staff
 from inq_service_svc.utils.websocket_manager import manager
@@ -39,6 +44,26 @@ def list_inquiries(
     except Exception as e:
         logger.error(e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@inquiries_router.get("/{inquiry_id}", response_model=InquiryDetailResponse)
+def get_inquiry_detail(
+    inquiry_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Inquiry:
+    """Retrieve full inquiry detail including messages. Requires authentication."""
+    try:
+        stmt = select(Inquiry).where(Inquiry.id == inquiry_id).options(selectinload(Inquiry.messages))
+        inquiry = db.execute(stmt).scalar_one_or_none()
+    except Exception as e:
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    if inquiry is None:
+        raise HTTPException(status_code=404, detail="Inquiry not found")
+
+    return inquiry
 
 
 @inquiries_router.post("/", response_model=InquiryResponse, status_code=status.HTTP_201_CREATED)
