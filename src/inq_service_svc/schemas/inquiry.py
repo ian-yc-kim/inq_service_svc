@@ -28,3 +28,16 @@ class InquiryResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class InquiryUpdate(BaseModel):
+    """Payload for partial update of Inquiry.
+
+    Fields are optional; exclude_unset will be used by handlers to apply updates.
+    Use InquiryStatus for status to leverage pydantic enum validation.
+    """
+
+    status: Optional[InquiryStatus] = None
+    assigned_user_id: Optional[int] = None
+
+    model_config = ConfigDict()

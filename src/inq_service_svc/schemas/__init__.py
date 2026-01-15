@@ -1,5 +1,5 @@
 from .auth import Token, TokenData, LoginRequest
-from .inquiry import InquiryCreate, InquiryResponse
+from .inquiry import InquiryCreate, InquiryResponse, InquiryUpdate
 
 __all__ = [
     "Token",
@@ -7,4 +7,5 @@ __all__ = [
     "LoginRequest",
     "InquiryCreate",
     "InquiryResponse",
+    "InquiryUpdate",
 ]

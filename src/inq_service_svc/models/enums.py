@@ -8,6 +8,7 @@ class UserRole(str, Enum):
 
 class InquiryStatus(str, Enum):
     New = "New"
+    InProgress = "InProgress"
     On_Hold = "On-Hold"
     Completed = "Completed"
 

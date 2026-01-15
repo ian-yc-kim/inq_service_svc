@@ -132,3 +132,178 @@ def test_list_inquiries_filter_by_status(client, db_session):
 def test_list_inquiries_unauthenticated_returns_401(client):
     resp = client.get("/api/inquiries")
     assert resp.status_code == 401
+
+
+# New tests for PATCH /api/inquiries/{id}
+
+def test_patch_inquiry_update_status_success_broadcasts(client, db_session):
+    # prepare users and auth
+    email = "patcher@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    # create inquiry
+    inq = Inquiry(title="Updatable", content="x", customer_email="u@example.com", customer_name="U", status=InquiryStatus.New)
+    db_session.add(inq)
+    db_session.commit()
+    db_session.refresh(inq)
+
+    with patch("inq_service_svc.routers.inquiries.manager") as mock_manager:
+        mock_manager.broadcast = AsyncMock()
+
+        resp = client.patch(f"/api/inquiries/{inq.id}", json={"status": "Completed"}, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "Completed"
+
+        # ensure test session sees DB changes
+        db_session.expire_all()
+
+        # verify DB updated
+        stmt = select(Inquiry).where(Inquiry.id == inq.id)
+        fetched = db_session.execute(stmt).scalar_one()
+        assert fetched.status == InquiryStatus.Completed
+
+        # verify broadcast called with correct payload
+        assert mock_manager.broadcast.call_count == 1
+        called_arg = mock_manager.broadcast.call_args[0][0]
+        payload = json.loads(called_arg)
+        assert payload["event"] == "inquiry_updated"
+        assert payload["inquiry_id"] == inq.id
+        assert payload["status"] == "Completed"
+        assert payload.get("assigned_user_id") == fetched.assigned_user_id
+
+
+def test_patch_inquiry_update_assigned_user_id_success_broadcasts(client, db_session):
+    # prepare users and auth
+    author_email = "assigner@example.com"
+    pw = "pw123"
+    create_user(db_session, author_email, pw)
+    headers = get_auth_header(client, author_email, pw)
+
+    # create assignee user
+    assignee = create_user(db_session, "assignee@example.com", "pw123")
+
+    # create inquiry without assignment
+    inq = Inquiry(title="AssignMe", content="y", customer_email="a@example.com", customer_name="A", status=InquiryStatus.New)
+    db_session.add(inq)
+    db_session.commit()
+    db_session.refresh(inq)
+
+    with patch("inq_service_svc.routers.inquiries.manager") as mock_manager:
+        mock_manager.broadcast = AsyncMock()
+
+        resp = client.patch(f"/api/inquiries/{inq.id}", json={"assigned_user_id": assignee.id}, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assigned_user_id"] == assignee.id
+
+        # ensure test session sees DB changes
+        db_session.expire_all()
+
+        # verify DB updated
+        stmt = select(Inquiry).where(Inquiry.id == inq.id)
+        fetched = db_session.execute(stmt).scalar_one()
+        assert fetched.assigned_user_id == assignee.id
+
+        # verify broadcast
+        assert mock_manager.broadcast.call_count == 1
+        called_arg = mock_manager.broadcast.call_args[0][0]
+        payload = json.loads(called_arg)
+        assert payload["event"] == "inquiry_updated"
+        assert payload["inquiry_id"] == inq.id
+        assert payload["assigned_user_id"] == assignee.id
+
+
+def test_patch_inquiry_not_found_returns_404(client, db_session):
+    email = "notfoundtester@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    with patch("inq_service_svc.routers.inquiries.manager") as mock_manager:
+        mock_manager.broadcast = AsyncMock()
+
+        resp = client.patch("/api/inquiries/9999", json={"status": "Completed"}, headers=headers)
+        assert resp.status_code == 404
+        assert mock_manager.broadcast.call_count == 0
+
+
+def test_patch_inquiry_invalid_assigned_user_id_returns_400(client, db_session):
+    # prepare users and auth
+    email = "invalidassigner@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    # create inquiry
+    inq = Inquiry(title="T", content="c", customer_email="e@example.com", customer_name="N", status=InquiryStatus.New)
+    db_session.add(inq)
+    db_session.commit()
+    db_session.refresh(inq)
+
+    with patch("inq_service_svc.routers.inquiries.manager") as mock_manager:
+        mock_manager.broadcast = AsyncMock()
+
+        resp = client.patch(f"/api/inquiries/{inq.id}", json={"assigned_user_id": 99999}, headers=headers)
+        assert resp.status_code == 400
+        assert mock_manager.broadcast.call_count == 0
+
+
+def test_patch_inquiry_unauthenticated_returns_401(client, db_session):
+    # create inquiry
+    inq = Inquiry(title="NoAuth", content="z", customer_email="na@example.com", customer_name="NA", status=InquiryStatus.New)
+    db_session.add(inq)
+    db_session.commit()
+    db_session.refresh(inq)
+
+    # no auth header provided
+    resp = client.patch(f"/api/inquiries/{inq.id}", json={"status": "Completed"})
+    assert resp.status_code == 401
+
+
+def test_patch_inquiry_update_both_fields_success_broadcasts(client, db_session):
+    # prepare users and auth
+    author_email = "bothfields@example.com"
+    pw = "pw123"
+    create_user(db_session, author_email, pw)
+    headers = get_auth_header(client, author_email, pw)
+
+    # create assignee user
+    assignee = create_user(db_session, "both_assignee@example.com", "pw123")
+
+    # create inquiry
+    inq = Inquiry(title="Both", content="both", customer_email="both@example.com", customer_name="B", status=InquiryStatus.New)
+    db_session.add(inq)
+    db_session.commit()
+    db_session.refresh(inq)
+
+    with patch("inq_service_svc.routers.inquiries.manager") as mock_manager:
+        mock_manager.broadcast = AsyncMock()
+
+        resp = client.patch(
+            f"/api/inquiries/{inq.id}",
+            json={"status": "InProgress", "assigned_user_id": assignee.id},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "InProgress"
+        assert data["assigned_user_id"] == assignee.id
+
+        # ensure test session sees DB changes
+        db_session.expire_all()
+
+        stmt = select(Inquiry).where(Inquiry.id == inq.id)
+        fetched = db_session.execute(stmt).scalar_one()
+        assert fetched.status == InquiryStatus.InProgress
+        assert fetched.assigned_user_id == assignee.id
+
+        assert mock_manager.broadcast.call_count == 1
+        called_arg = mock_manager.broadcast.call_args[0][0]
+        payload = json.loads(called_arg)
+        assert payload["event"] == "inquiry_updated"
+        assert payload["inquiry_id"] == inq.id
+        assert payload["status"] == "InProgress"
+        assert payload["assigned_user_id"] == assignee.id
