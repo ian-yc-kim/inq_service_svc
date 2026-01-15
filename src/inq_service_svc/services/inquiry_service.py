@@ -7,6 +7,13 @@ from sqlalchemy.orm import Session
 from inq_service_svc.models import User, Inquiry
 from inq_service_svc.models.enums import UserRole, InquiryStatus
 
+from inq_service_svc.schemas.inquiry import InquiryCreate
+from inq_service_svc.services.classifier import (
+    classify_inquiry,
+    DEFAULT_CLASSIFICATION,
+    ClassificationResult,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,3 +63,54 @@ def assign_staff(db: Session) -> Optional[int]:
         logger.error(e, exc_info=True)
         # Fail-safe: return None on unexpected errors
         return None
+
+
+def create_inquiry(db: Session, inquiry_data: InquiryCreate) -> Inquiry:
+    """Create and persist a new Inquiry, including classification and staff assignment.
+
+    This function encapsulates the business logic of creating an inquiry. It does not
+    perform side-effects like websocket broadcasting or sending emails.
+    """
+    try:
+        # classification may fail but returns default result
+        try:
+            classification: ClassificationResult = classify_inquiry(inquiry_data.title, inquiry_data.content)
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            classification = DEFAULT_CLASSIFICATION
+
+        # assignment may fail and return None
+        try:
+            assigned_user_id: Optional[int] = assign_staff(db)
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            assigned_user_id = None
+
+        inquiry = Inquiry(
+            title=inquiry_data.title,
+            content=inquiry_data.content,
+            customer_email=str(inquiry_data.customer_email),
+            customer_name=inquiry_data.customer_name,
+            status=InquiryStatus.New,
+            category=classification.category,
+            urgency=classification.urgency,
+            assigned_user_id=assigned_user_id,
+        )
+
+        try:
+            db.add(inquiry)
+            db.commit()
+            db.refresh(inquiry)
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            try:
+                db.rollback()
+            except Exception as ex:
+                logger.error(ex, exc_info=True)
+            # re-raise to let callers translate to HTTP responses
+            raise
+
+        return inquiry
+    except Exception as e:
+        logger.error(e, exc_info=True)
+        raise

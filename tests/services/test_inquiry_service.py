@@ -1,7 +1,10 @@
 import pytest
 
 from inq_service_svc.models import User, Inquiry, UserRole, InquiryStatus
-from inq_service_svc.services.inquiry_service import assign_staff
+from inq_service_svc.services.inquiry_service import assign_staff, create_inquiry
+from inq_service_svc.services.classifier import ClassificationResult
+from inq_service_svc.schemas.inquiry import InquiryCreate
+from unittest.mock import patch
 
 
 def test_no_staff_returns_none(db_session):
@@ -55,3 +58,69 @@ def test_multiple_staff_equal_workloads_returns_any(db_session):
     # No active inquiries for either staff -> equal workload
     res = assign_staff(db_session)
     assert res in {staff_x.id, staff_y.id}
+
+
+# New tests for create_inquiry service
+
+def test_create_inquiry_persists_sets_status_and_classification(db_session):
+    # create one staff to be assigned
+    staff = User(email="svcstaff@example.com", hashed_password="h", name="S", role=UserRole.Staff)
+    db_session.add(staff)
+    db_session.commit()
+    db_session.refresh(staff)
+
+    with patch("inq_service_svc.services.inquiry_service.classify_inquiry") as mock_classify:
+        mock_classify.return_value = ClassificationResult(category="Billing", urgency="High")
+
+        payload = InquiryCreate(title="Billing issue", content="Charged twice", customer_email="c@test.com", customer_name="C")
+        created = create_inquiry(db_session, payload)
+
+        assert created.id is not None
+        assert created.status == InquiryStatus.New
+        assert created.category == "Billing"
+        assert created.urgency == "High"
+
+        # verify persisted in DB
+        fetched = db_session.get(Inquiry, created.id)
+        assert fetched is not None
+        assert fetched.title == "Billing issue"
+        assert fetched.customer_email == "c@test.com"
+
+
+def test_create_inquiry_assigns_lowest_workload_staff_integration(db_session):
+    # create two staff users
+    staff_a = User(email="a2@example.com", hashed_password="h", name="A2", role=UserRole.Staff)
+    staff_b = User(email="b2@example.com", hashed_password="h", name="B2", role=UserRole.Staff)
+    db_session.add_all([staff_a, staff_b])
+    db_session.commit()
+    db_session.refresh(staff_a)
+    db_session.refresh(staff_b)
+
+    # assign an active inquiry to staff_a to increase workload
+    inq_existing = Inquiry(title="Old", content="x", customer_email="old@example.com", status=InquiryStatus.New, assigned_user_id=staff_a.id)
+    db_session.add(inq_existing)
+    db_session.commit()
+
+    with patch("inq_service_svc.services.inquiry_service.classify_inquiry") as mock_classify:
+        mock_classify.return_value = ClassificationResult(category="Technical", urgency="Low")
+
+        payload = InquiryCreate(title="New problem", content="doesn't work", customer_email="n@test.com", customer_name="N")
+        created = create_inquiry(db_session, payload)
+
+        # assigned should favor staff_b (lower workload)
+        assert created.assigned_user_id == staff_b.id
+
+
+def test_create_inquiry_no_staff_results_in_none_assignment(db_session):
+    # create only an admin user
+    admin = User(email="onlyadmin@example.com", hashed_password="h", name="AdminOnly", role=UserRole.Admin)
+    db_session.add(admin)
+    db_session.commit()
+
+    with patch("inq_service_svc.services.inquiry_service.classify_inquiry") as mock_classify:
+        mock_classify.return_value = ClassificationResult(category="General", urgency="Medium")
+
+        payload = InquiryCreate(title="No staff", content="help", customer_email="ns@test.com", customer_name=None)
+        created = create_inquiry(db_session, payload)
+
+        assert created.assigned_user_id is None

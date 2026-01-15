@@ -19,8 +19,7 @@ from inq_service_svc.schemas.inquiry import (
     ReplyRequest,
     MessageResponse,
 )
-from inq_service_svc.services.classifier import classify_inquiry, ClassificationResult
-from inq_service_svc.services.inquiry_service import assign_staff
+from inq_service_svc.services import inquiry_service
 from inq_service_svc.utils.websocket_manager import manager
 from inq_service_svc.utils.email_client import send_email
 from inq_service_svc.routers.auth import get_current_user
@@ -77,41 +76,13 @@ def create_inquiry(
 ) -> Inquiry:
     """Create a new inquiry, classify it, assign staff, persist, and broadcast event."""
     try:
-        # classification may fail but returns default result
         try:
-            classification: ClassificationResult = classify_inquiry(payload.title, payload.content)
+            inquiry = inquiry_service.create_inquiry(db, payload)
+        except HTTPException:
+            # let HTTP exceptions bubble
+            raise
         except Exception as e:
             logger.error(e, exc_info=True)
-            classification = ClassificationResult(category="General", urgency="Medium")
-
-        # assignment may fail and return None
-        try:
-            assigned_user_id: Optional[int] = assign_staff(db)
-        except Exception as e:
-            logger.error(e, exc_info=True)
-            assigned_user_id = None
-
-        inquiry = Inquiry(
-            title=payload.title,
-            content=payload.content,
-            customer_email=str(payload.customer_email),
-            customer_name=payload.customer_name,
-            status=InquiryStatus.New,
-            category=classification.category,
-            urgency=classification.urgency,
-            assigned_user_id=assigned_user_id,
-        )
-
-        try:
-            db.add(inquiry)
-            db.commit()
-            db.refresh(inquiry)
-        except Exception as e:
-            logger.error(e, exc_info=True)
-            try:
-                db.rollback()
-            except Exception as ex:
-                logger.error(ex, exc_info=True)
             raise HTTPException(status_code=500, detail="Internal server error")
 
         # schedule broadcast of new inquiry event

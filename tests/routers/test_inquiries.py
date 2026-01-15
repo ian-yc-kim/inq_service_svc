@@ -49,9 +49,9 @@ def get_auth_header(client, email: str, password: str) -> dict:
 
 
 def test_create_inquiry_success_persists_and_returns(client, db_session):
-    # Patch classifier and assign_staff used in router
-    with patch("inq_service_svc.routers.inquiries.classify_inquiry") as mock_classify, \
-        patch("inq_service_svc.routers.inquiries.assign_staff") as mock_assign, \
+    # Patch classifier and assign_staff used in service layer
+    with patch("inq_service_svc.services.inquiry_service.classify_inquiry") as mock_classify, \
+        patch("inq_service_svc.services.inquiry_service.assign_staff") as mock_assign, \
         patch("inq_service_svc.routers.inquiries.manager") as mock_manager:
         mock_classify.return_value = ClassificationResult(category="Billing", urgency="High")
         mock_assign.return_value = 1

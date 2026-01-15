@@ -12,7 +12,7 @@ class InquiryCreate(BaseModel):
     title: str
     content: str
     customer_email: EmailStr
-    customer_name: str
+    customer_name: Optional[str] = None
 
 
 class InquiryResponse(BaseModel):
