@@ -48,3 +48,7 @@ class ConnectionManager:
                 self.disconnect(ws)
             except Exception as e:
                 _logger.error(e, exc_info=True)
+
+
+# Module-level singleton manager used by routers to broadcast events
+manager = ConnectionManager()
