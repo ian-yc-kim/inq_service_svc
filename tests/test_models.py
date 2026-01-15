@@ -89,3 +89,21 @@ def test_user_email_unique_constraint(db_session):
     db_session.add(user2)
     with pytest.raises(IntegrityError):
         db_session.commit()
+
+
+def test_inquiry_customer_name_nullable_and_persist(db_session):
+    # create with customer_name set
+    inquiry = Inquiry(title="NameTest", content="Content", customer_email="cust3@example.com", customer_name="John Doe")
+    db_session.add(inquiry)
+    db_session.commit()
+    db_session.refresh(inquiry)
+
+    assert inquiry.customer_name == "John Doe"
+
+    # create without customer_name should still work (nullable True)
+    inquiry2 = Inquiry(title="NoName", content="No name provided", customer_email="cust4@example.com")
+    db_session.add(inquiry2)
+    db_session.commit()
+    db_session.refresh(inquiry2)
+
+    assert inquiry2.customer_name is None

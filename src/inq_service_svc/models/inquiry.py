@@ -13,6 +13,7 @@ class Inquiry(Base):
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     customer_email = Column(String, nullable=False)
+    customer_name = Column(String, nullable=True)
     status = Column(SAEnum(InquiryStatus, native_enum=False), nullable=False, default=InquiryStatus.New)
     category = Column(String, nullable=True)
     urgency = Column(String, nullable=True)
