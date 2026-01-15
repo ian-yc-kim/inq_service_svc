@@ -265,17 +265,160 @@ Routing note
 - The implementation mounts the users router under the application prefix /api/users. The router uses @users_router.post("/"), @users_router.get("/"), etc., so the canonical endpoints are /api/users/ and /api/users/{id}. FastAPI will typically redirect /api/users to /api/users/.
 
 
+## Inquiries API
+
+This section documents endpoints related to customer inquiries.
+
+### POST /api/inquiries
+
+Description
+- Create a new customer inquiry. The endpoint validates input, runs an automatic classification, optionally assigns staff, persists the inquiry, and schedules a WebSocket broadcast event announcing the new inquiry.
+
+Notes on path
+- Router is mounted under the application prefix /api/inquiries with @inquiries_router.post("/"). Canonical path is /api/inquiries/; FastAPI will accept and may redirect /api/inquiries to /api/inquiries/.
+
+Authentication
+- The current implementation of the inquiries create endpoint does not require a JWT access token. Documented as no authentication required.
+
+Request
+- URL: POST /api/inquiries
+- Content-Type: application/json
+
+Request body schema (InquiryCreate):
+- title: string
+- content: string
+- customer_email: string (email)
+- customer_name: string
+
+Example request body:
+
+```json
+{
+  "title": "Unable to access account",
+  "content": "I tried to log in but I get an unexpected error code 500.",
+  "customer_email": "customer@example.com",
+  "customer_name": "Jane Customer"
+}
+```
+
+Responses
+
+201 Created
+- Description: Inquiry created and persisted.
+- Response model: InquiryResponse
+- Response schema fields:
+  - id: integer
+  - title: string
+  - content: string
+  - customer_email: string (email)
+  - customer_name: string | null
+  - status: enum (InquiryStatus, e.g., New)
+  - category: string | null (AI-generated classification, e.g., "Account Issues")
+  - urgency: string | null (AI-assigned urgency, e.g., "High")
+  - assigned_user_id: integer | null (id of assigned staff)
+  - created_at: ISO-8601 datetime string
+
+Example success response (201):
+
+```json
+{
+  "id": 123,
+  "title": "Unable to access account",
+  "content": "I tried to log in but I get an unexpected error code 500.",
+  "customer_email": "customer@example.com",
+  "customer_name": "Jane Customer",
+  "status": "New",
+  "category": "Account Issues",
+  "urgency": "High",
+  "assigned_user_id": null,
+  "created_at": "2025-01-15T12:34:56.789012"
+}
+```
+
+Errors
+- 422 Unprocessable Entity: Request validation failed (e.g., invalid email format for customer_email). FastAPI/Pydantic returns details about the invalid field.
+- 500 Internal Server Error: Persistence or unexpected failure while handling the request. The endpoint translates internal failures to HTTP 500.
+
+Events
+- On successful creation, the service schedules a broadcast over the WebSocket manager. The event is a JSON-encoded string with shape:
+  - {"event": "new_inquiry", "inquiry_id": <id>}
+
 Cross-checks
-- Endpoint paths documented match router prefix /api/users and route definitions in src/inq_service_svc/routers/users.py.
-- Admin-only enforcement is implemented via a helper that raises HTTP 403 Forbidden when current_user.role != Admin.
-- Request/response schemas align with Pydantic models in src/inq_service_svc/schemas/user.py: UserCreate, UserUpdate, UserResponse.
-- Status codes and error responses documented reflect the HTTPException usage in the router implementation.
+- Implementation: src/inq_service_svc/routers/inquiries.py#create_inquiry uses InquiryCreate request model and InquiryResponse response model (src/inq_service_svc/schemas/inquiry.py).
+- Broadcast call: background task adds manager.broadcast(json.dumps({"event":"new_inquiry","inquiry_id": inquiry.id})).
+
+
+## WebSocket API
+
+Realtime updates are delivered via WebSocket connections.
+
+Endpoint
+- Path: /api/ws
+- Router: websocket router is mounted under the application prefix /api so endpoint becomes /api/ws
+
+Example connection URLs
+- Local (development): ws://localhost:8000/api/ws
+- Deployed (example): wss://api.thesenai.com/inq_service_svc/api/ws
+
+Transport details
+- Text frames are used for all messages.
+- The server accepts connections and tracks active connections in an in-memory ConnectionManager (src/inq_service_svc/utils/websocket_manager.py).
+
+Client → Server behavior
+- Send the literal text "ping" to receive the literal text "pong" from the server (keep-alive / ping/pong semantics).
+- Sending any other text message will result in the server echoing the same text back to the sender.
+
+Server → Client behavior
+- Broadcasts are JSON-encoded text messages. Current broadcasted event example when a new inquiry is created:
+  - {"event": "new_inquiry", "inquiry_id": 123}
+- Clients should attempt to parse incoming text as JSON; non-JSON payloads (e.g., echo responses or "pong") should be handled gracefully.
+
+Example JavaScript client usage
+
+```javascript
+const ws = new WebSocket('ws://localhost:8000/api/ws');
+
+ws.addEventListener('open', () => {
+  // Send a ping to test connection
+  ws.send('ping');
+});
+
+ws.addEventListener('message', (event) => {
+  const text = event.data;
+  try {
+    const obj = JSON.parse(text);
+    if (obj.event === 'new_inquiry') {
+      console.log('New inquiry id:', obj.inquiry_id);
+    } else {
+      console.log('Received event:', obj);
+    }
+  } catch (err) {
+    // Not JSON: could be pong or echo
+    if (text === 'pong') {
+      console.log('Received pong');
+    } else {
+      console.log('Echo or text message:', text);
+    }
+  }
+});
+
+ws.addEventListener('close', () => console.log('WebSocket closed'));
+ws.addEventListener('error', (e) => console.error('WebSocket error', e));
+```
+
+Cross-checks
+- WebSocket router implementation: src/inq_service_svc/routers/websocket.py (websocket endpoint accepts connections, handles ping/pong, and echoes other messages).
+- Connection manager: src/inq_service_svc/utils/websocket_manager.py manages active connections and broadcast(message) to all connections.
 
 
 ## Cross-checks (global)
-- Endpoint path documented as /api/auth/login and /api/users/* to match implementation.
+- Endpoint paths documented match router prefixes and definitions in src/inq_service_svc/routers.
+- POST /api/inquiries matches src/inq_service_svc/routers/inquiries.py and uses InquiryCreate/InquiryResponse from src/inq_service_svc/schemas/inquiry.py.
+- WebSocket /api/ws matches src/inq_service_svc/routers/websocket.py and uses the ConnectionManager broadcast in src/inq_service_svc/utils/websocket_manager.py.
 - Request/response schemas align with Pydantic models found in src/inq_service_svc/schemas.
 
 
 ## Change log
 - 2025-01-14: Added User Management API documentation covering POST, GET, PATCH, DELETE endpoints and permission details.
+- 2025-01-15: Added Inquiries API documentation for POST /api/inquiries: request/response schemas, examples, errors, and event notes.
+- 2025-01-15: Added WebSocket API documentation for /api/ws: connection details, message formats, and a JavaScript client example.
