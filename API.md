@@ -391,6 +391,77 @@ Notes
 - When status query param is provided, it is validated against the InquiryStatus enum.
 
 
+### GET /api/inquiries/{id}
+
+Description
+- Retrieve inquiry details including full message history for the given inquiry id.
+
+Authentication
+- Requires an Authorization header with a valid bearer token obtained from POST /api/auth/login.
+
+URL
+- GET /api/inquiries/{id}
+
+URL Parameters
+- id (integer): Inquiry ID to retrieve.
+
+Response (200 OK)
+- Response model: InquiryDetailResponse
+- Fields include all InquiryResponse fields plus:
+  - messages: array of MessageResponse objects
+    - id: int
+    - content: string
+    - sender_type: "Customer" | "Staff"
+    - timestamp: ISO-8601 datetime string
+
+Example curl
+
+```bash
+curl -X GET "http://localhost:8000/api/inquiries/123" \
+  -H "Authorization: Bearer eyJhbGciOiJI..." \
+  -H "Accept: application/json"
+```
+
+Example success response (200):
+
+```json
+{
+  "id": 123,
+  "title": "Unable to access account",
+  "content": "I tried to log in but I get an unexpected error code 500.",
+  "customer_email": "customer@example.com",
+  "customer_name": "Jane Customer",
+  "status": "New",
+  "category": "Account Issues",
+  "urgency": "High",
+  "assigned_user_id": null,
+  "created_at": "2025-01-15T12:34:56.789012",
+  "messages": [
+    {
+      "id": 1,
+      "content": "Initial customer message",
+      "sender_type": "Customer",
+      "timestamp": "2025-01-15T12:35:00.000000"
+    },
+    {
+      "id": 2,
+      "content": "Staff reply",
+      "sender_type": "Staff",
+      "timestamp": "2025-01-15T13:00:00.000000"
+    }
+  ]
+}
+```
+
+Error cases
+- 401 Unauthorized: missing/invalid token
+- 404 Not Found: `{ "detail": "Inquiry not found" }`
+- 500 Internal Server Error
+
+Cross-check note
+- Implementation: src/inq_service_svc/routers/inquiries.py#get_inquiry_detail uses selectinload(Inquiry.messages) to return related messages.
+
+
 ### PATCH /api/inquiries/{id}
 
 Description
@@ -435,6 +506,68 @@ Implementation details
 - On successful update the service schedules a WebSocket broadcast event (see WebSocket API below).
 
 
+### POST /api/inquiries/{id}/reply
+
+Description
+- Submit a staff reply to an inquiry. The endpoint creates a Message record, marks the inquiry Completed, sends an email to the customer, and broadcasts an inquiry_updated WebSocket event.
+
+Authentication
+- Requires an Authorization header with a valid bearer token obtained from POST /api/auth/login.
+
+URL
+- POST /api/inquiries/{id}/reply
+
+URL Parameters
+- id (integer): Inquiry ID to reply to.
+
+Request Body
+- Schema: ReplyRequest
+  - content (string): Reply message body
+
+Example request body
+
+```json
+{
+  "content": "Thank you for contacting support. We have resolved your issue." 
+}
+```
+
+Behavior
+- Creates a new Message with sender_type = "Staff" linked to the inquiry.
+- Updates the inquiry.status to "Completed".
+- Sends an email to the customer via send_email(to, subject, body). Subject formatted as: Re: {inquiry.title}.
+- Broadcasts a WebSocket event inquiry_updated with inquiry_id and status: "Completed".
+- Email sending and websocket broadcast are scheduled as BackgroundTasks; failures are logged and do not cause the HTTP response to fail.
+
+Response (200 OK)
+- Response model: MessageResponse
+- Fields:
+  - id: int
+  - content: string
+  - sender_type: "Staff"
+  - timestamp: ISO-8601 datetime
+
+Example success response (200):
+
+```json
+{
+  "id": 42,
+  "content": "Thank you for contacting support. We have resolved your issue.",
+  "sender_type": "Staff",
+  "timestamp": "2026-01-15T14:00:00.000000"
+}
+```
+
+Error cases
+- 401 Unauthorized: missing/invalid token
+- 404 Not Found: `{ "detail": "Inquiry not found" }`
+- 422 Unprocessable Entity: missing/invalid body
+- 500 Internal Server Error
+
+Cross-check note
+- Implementation: src/inq_service_svc/routers/inquiries.py#reply_inquiry handles persistence, status update, send_email background task, and manager.broadcast background task.
+
+
 ## WebSocket API
 
 Realtime updates are delivered via WebSocket connections.
@@ -474,7 +607,7 @@ Events
 {"event": "inquiry_updated", "inquiry_id": 123, "status": "New", "assigned_user_id": 2}
 ```
 
-    - Emitted after a successful PATCH /api/inquiries/{inquiry_id} update. The payload includes the inquiry id, the updated status (as a string), and assigned_user_id which may be null.
+    - Emitted after a successful PATCH /api/inquiries/{inquiry_id} update or when a staff reply marks an inquiry Completed. The payload includes the inquiry id, the updated status (as a string), and assigned_user_id which may be null.
     - Clients should handle this event to update UI state for the affected inquiry.
 
 Example JavaScript client usage
@@ -530,3 +663,4 @@ Cross-checks
 - 2025-01-15: Added Inquiries API documentation for POST /api/inquiries: request/response schemas, examples, errors, and event notes.
 - 2025-01-15: Added WebSocket API documentation for /api/ws: connection details, message formats, and a JavaScript client example.
 - 2026-01-15: Documented GET /api/inquiries (authentication, optional status query param) and PATCH /api/inquiries/{inquiry_id} (InquiryUpdate schema, errors) and added inquiry_updated WebSocket event documentation.
+- 2026-01-15: Documented GET /api/inquiries/{id} endpoint and POST /api/inquiries/{id}/reply endpoint with examples, behavior notes, and error cases.
