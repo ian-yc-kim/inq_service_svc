@@ -9,17 +9,20 @@ from sqlalchemy import select, update as sa_update
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 
-from inq_service_svc.models import Inquiry, get_db, User
-from inq_service_svc.models.enums import InquiryStatus
+from inq_service_svc.models import Inquiry, get_db, User, Message
+from inq_service_svc.models.enums import InquiryStatus, MessageSenderType
 from inq_service_svc.schemas.inquiry import (
     InquiryCreate,
     InquiryResponse,
     InquiryUpdate,
     InquiryDetailResponse,
+    ReplyRequest,
+    MessageResponse,
 )
 from inq_service_svc.services.classifier import classify_inquiry, ClassificationResult
 from inq_service_svc.services.inquiry_service import assign_staff
 from inq_service_svc.utils.websocket_manager import manager
+from inq_service_svc.utils.email_client import send_email
 from inq_service_svc.routers.auth import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -232,6 +235,72 @@ def update_inquiry(
             logger.error(e, exc_info=True)
 
         return inquiry
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@inquiries_router.post("/{inquiry_id}/reply", response_model=MessageResponse)
+def reply_inquiry(
+    inquiry_id: int,
+    payload: ReplyRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Message:
+    """Create a staff Message reply for an inquiry, mark inquiry Completed, and notify via email and websocket."""
+    try:
+        try:
+            inquiry = db.get(Inquiry, inquiry_id)
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+        if inquiry is None:
+            raise HTTPException(status_code=404, detail="Inquiry not found")
+
+        message = Message(
+            content=payload.content,
+            inquiry_id=inquiry_id,
+            sender_type=MessageSenderType.Staff,
+        )
+
+        # Update inquiry status
+        try:
+            inquiry.status = InquiryStatus.Completed
+        except Exception as e:
+            logger.error(e, exc_info=True)
+
+        # persist message and inquiry status
+        try:
+            db.add(message)
+            db.commit()
+            db.refresh(message)
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            try:
+                db.rollback()
+            except Exception as ex:
+                logger.error(ex, exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+        # schedule email sending as background task
+        try:
+            subject = f"Re: {inquiry.title}"
+            background_tasks.add_task(send_email, inquiry.customer_email, subject, payload.content)
+        except Exception as e:
+            logger.error(e, exc_info=True)
+
+        # schedule websocket broadcast about inquiry update
+        try:
+            payload_msg = json.dumps({"event": "inquiry_updated", "inquiry_id": inquiry.id, "status": "Completed"})
+            background_tasks.add_task(manager.broadcast, payload_msg)
+        except Exception as e:
+            logger.error(e, exc_info=True)
+
+        return message
     except HTTPException:
         raise
     except Exception as e:

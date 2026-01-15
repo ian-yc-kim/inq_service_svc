@@ -56,3 +56,10 @@ class InquiryDetailResponse(InquiryResponse):
     messages: List[MessageResponse]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# New request schema for reply endpoint
+class ReplyRequest(BaseModel):
+    content: str
+
+    model_config = ConfigDict()

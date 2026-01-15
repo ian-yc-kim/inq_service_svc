@@ -360,3 +360,72 @@ def test_get_inquiry_detail_not_found(client, db_session):
     resp = client.get("/api/inquiries/999999", headers=headers)
     assert resp.status_code == 404
     assert resp.json().get("detail") == "Inquiry not found"
+
+
+# New tests for POST /api/inquiries/{id}/reply
+
+def test_reply_inquiry_success_saves_message_updates_status_and_notifies(client, db_session):
+    # prepare user and auth
+    email = "replier@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    # create inquiry
+    inq = Inquiry(title="Replyable", content="orig", customer_email="custreply@example.com", customer_name="C", status=InquiryStatus.New)
+    db_session.add(inq)
+    db_session.commit()
+    db_session.refresh(inq)
+
+    from inq_service_svc.models import Message
+    from inq_service_svc.models.enums import MessageSenderType
+
+    with patch("inq_service_svc.routers.inquiries.send_email") as mock_send, patch("inq_service_svc.routers.inquiries.manager") as mock_manager:
+        mock_manager.broadcast = AsyncMock()
+
+        resp = client.post(f"/api/inquiries/{inq.id}/reply", json={"content": "This is a staff reply"}, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["content"] == "This is a staff reply"
+        assert data["sender_type"] == "Staff"
+        assert "id" in data
+
+        # ensure DB session sees changes
+        db_session.expire_all()
+
+        # verify message persisted
+        stmt = select(Message).where(Message.inquiry_id == inq.id)
+        fetched_msg = db_session.execute(stmt).scalars().all()
+        # there should be at least one message (the reply)
+        assert any(m.content == "This is a staff reply" for m in fetched_msg)
+
+        # verify inquiry status updated
+        stmt_inq = select(Inquiry).where(Inquiry.id == inq.id)
+        fetched_inq = db_session.execute(stmt_inq).scalar_one()
+        assert fetched_inq.status == InquiryStatus.Completed
+
+        # verify send_email called with correct args
+        mock_send.assert_called_once_with(inq.customer_email, f"Re: {inq.title}", "This is a staff reply")
+
+        # verify websocket broadcast called
+        assert mock_manager.broadcast.call_count == 1
+        called_arg = mock_manager.broadcast.call_args[0][0]
+        payload = json.loads(called_arg)
+        assert payload["event"] == "inquiry_updated"
+        assert payload["inquiry_id"] == inq.id
+        assert payload["status"] == "Completed"
+
+
+def test_reply_inquiry_not_found_returns_404_and_no_notifications(client, db_session):
+    email = "replynotfound@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    with patch("inq_service_svc.routers.inquiries.send_email") as mock_send, patch("inq_service_svc.routers.inquiries.manager") as mock_manager:
+        mock_manager.broadcast = AsyncMock()
+
+        resp = client.post("/api/inquiries/999999/reply", json={"content": "No one"}, headers=headers)
+        assert resp.status_code == 404
+        assert mock_send.call_count == 0
+        assert mock_manager.broadcast.call_count == 0

@@ -5,6 +5,7 @@ from .inquiry import (
     InquiryUpdate,
     MessageResponse,
     InquiryDetailResponse,
+    ReplyRequest,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "InquiryUpdate",
     "MessageResponse",
     "InquiryDetailResponse",
+    "ReplyRequest",
 ]
