@@ -28,3 +28,6 @@ try:
 except Exception as e:
     logging.error(e, exc_info=True)
     ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Comma separated list of blacklisted sender domains
+EMAIL_DOMAIN_BLACKLIST: str = os.getenv("EMAIL_DOMAIN_BLACKLIST", "")

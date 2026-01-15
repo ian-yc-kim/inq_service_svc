@@ -2,6 +2,7 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+from imap_tools import AND
 
 from inq_service_svc.utils import email_client
 
@@ -31,7 +32,20 @@ def test_fetch_emails_happy_path(monkeypatch):
     mock_mailbox_cls.return_value.login.assert_called_with(
         "me@example.com", "secret", initial_folder="INBOX"
     )
-    # Verify fetch called with limit
+    # Verify fetch called with unread criteria and limit
+    mailbox_cm.fetch.assert_called_with(AND(seen=False), limit=2)
+    assert result == ["msg1", "msg2"]
+
+
+def test_fetch_emails_only_unread_flag_false(monkeypatch):
+    setup_config(monkeypatch)
+    mock_mailbox_cls = MagicMock()
+    mailbox_cm = mock_mailbox_cls.return_value.login.return_value.__enter__.return_value
+    mailbox_cm.fetch.return_value = ["msg1", "msg2"]
+
+    with patch("inq_service_svc.utils.email_client.MailBox", mock_mailbox_cls):
+        result = email_client.fetch_emails(limit=2, folder="INBOX", only_unread=False)
+
     mailbox_cm.fetch.assert_called_with(limit=2)
     assert result == ["msg1", "msg2"]
 

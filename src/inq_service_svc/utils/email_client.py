@@ -1,7 +1,7 @@
 import logging
 from typing import List
 
-from imap_tools import MailBox
+from imap_tools import MailBox, AND
 import smtplib
 from email.message import EmailMessage
 
@@ -10,7 +10,7 @@ from inq_service_svc import config
 _logger = logging.getLogger(__name__)
 
 
-def fetch_emails(limit: int = 10, folder: str = "INBOX") -> List[object]:
+def fetch_emails(limit: int = 10, folder: str = "INBOX", only_unread: bool = True) -> List[object]:
     """Fetch recent emails from the configured IMAP server.
 
     Returns a list of message objects from imap-tools.
@@ -26,7 +26,10 @@ def fetch_emails(limit: int = 10, folder: str = "INBOX") -> List[object]:
         with MailBox(config.EMAIL_IMAP_SERVER, config.EMAIL_IMAP_PORT).login(
             config.EMAIL_ACCOUNT, config.EMAIL_PASSWORD, initial_folder=folder
         ) as mailbox:
-            messages = list(mailbox.fetch(limit=limit))
+            if only_unread:
+                messages = list(mailbox.fetch(AND(seen=False), limit=limit))
+            else:
+                messages = list(mailbox.fetch(limit=limit))
             return messages
     except Exception as e:
         _logger.error(e, exc_info=True)
