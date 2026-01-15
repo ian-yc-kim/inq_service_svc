@@ -31,3 +31,10 @@ except Exception as e:
 
 # Comma separated list of blacklisted sender domains
 EMAIL_DOMAIN_BLACKLIST: str = os.getenv("EMAIL_DOMAIN_BLACKLIST", "")
+
+# New: polling interval for background email processing in minutes
+try:
+    EMAIL_POLLING_INTERVAL: int = int(os.getenv("EMAIL_POLLING_INTERVAL", "5"))
+except Exception as e:
+    logging.error(e, exc_info=True)
+    EMAIL_POLLING_INTERVAL = 5
