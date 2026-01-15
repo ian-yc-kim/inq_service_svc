@@ -3,8 +3,11 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 from sqlalchemy import select
+from passlib.context import CryptContext
 
+import inq_service_svc.utils.security as security
 from inq_service_svc.models import Inquiry
+from inq_service_svc.models.enums import InquiryStatus
 from inq_service_svc.services.classifier import ClassificationResult
 
 
@@ -14,6 +17,35 @@ VALID_PAYLOAD = {
     "customer_email": "cust@example.com",
     "customer_name": "Customer",
 }
+
+
+@pytest.fixture(autouse=True)
+def use_test_pwd_context(monkeypatch):
+    # Ensure deterministic hashing and JWT settings in tests
+    ctx = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+    monkeypatch.setattr(security, "pwd_context", ctx)
+    monkeypatch.setattr(security.config, "SECRET_KEY", "test-secret")
+    monkeypatch.setattr(security.config, "ALGORITHM", "HS256")
+    yield
+
+
+def create_user(db_session, email: str, password: str = "pw123"):
+    hashed = security.get_password_hash(password)
+    # role defaults to Staff in model; supply minimal fields
+    from inq_service_svc.models import User, UserRole
+
+    user = User(email=email, name="Tester", role=UserRole.Staff, hashed_password=hashed)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def get_auth_header(client, email: str, password: str) -> dict:
+    resp = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert resp.status_code == 200
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_create_inquiry_success_persists_and_returns(client, db_session):
@@ -52,3 +84,51 @@ def test_create_inquiry_invalid_email_returns_422(client):
     body = resp.json()
     # pydantic error should mention customer_email
     assert any("customer_email" in str(err) or err.get("loc") for err in body.get("detail", []))
+
+
+def test_list_inquiries_authenticated_returns_all(client, db_session):
+    # create staff user and obtain auth header
+    email = "staff@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    # create inquiries directly in DB
+    i1 = Inquiry(title="T1", content="c1", customer_email="a@example.com", customer_name="A", status=InquiryStatus.New)
+    i2 = Inquiry(title="T2", content="c2", customer_email="b@example.com", customer_name="B", status=InquiryStatus.Completed)
+    db_session.add_all([i1, i2])
+    db_session.commit()
+
+    resp = client.get("/api/inquiries", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) == 2
+    titles = {item["title"] for item in data}
+    assert {"T1", "T2"} <= titles
+
+
+def test_list_inquiries_filter_by_status(client, db_session):
+    email = "staff2@example.com"
+    pw = "pw123"
+    create_user(db_session, email, pw)
+    headers = get_auth_header(client, email, pw)
+
+    # create inquiries with different statuses
+    new1 = Inquiry(title="New1", content="x", customer_email="x@example.com", customer_name="X", status=InquiryStatus.New)
+    comp1 = Inquiry(title="Comp1", content="y", customer_email="y@example.com", customer_name="Y", status=InquiryStatus.Completed)
+    comp2 = Inquiry(title="Comp2", content="z", customer_email="z@example.com", customer_name="Z", status=InquiryStatus.Completed)
+    db_session.add_all([new1, comp1, comp2])
+    db_session.commit()
+
+    resp = client.get("/api/inquiries?status=Completed", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) == 2
+    assert all(item["status"] == "Completed" for item in data)
+
+
+def test_list_inquiries_unauthenticated_returns_401(client):
+    resp = client.get("/api/inquiries")
+    assert resp.status_code == 401
